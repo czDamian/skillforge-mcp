@@ -42,13 +42,12 @@ async function main() {
                     logger.info("Calling API...");
 
                     const apiUrl = process.env.SKILLFORGE_API_URL || "http://localhost:3000";
-                    const endpoint = `${apiUrl}/api/skills/execute`;
+                    const endpoint = `${apiUrl}/api/agent`;
 
                     const response = await axios.post(endpoint, {
                         skillId: Number(skill.skillId),
                         input,
                         buyer: blockchainSkillClient.getAccountAddress(),
-                        transactionId: `mcp-free-${Date.now()}`
                     });
 
                     const result = response.data;

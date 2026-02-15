@@ -21,7 +21,7 @@ Add the server to your `gemini.config.json` using the `sse` transport type:
 {
   "mcpServers": {
     "skillforge": {
-      "url": "https://your-skillforge-mcp.onrender.com/sse"
+      "url": "https://skillforge-mcp.onrender.com/sse"
     }
   }
 }
