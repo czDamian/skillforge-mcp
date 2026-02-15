@@ -19,80 +19,102 @@ const server = new McpServer({
 async function main() {
     logger.info("Starting SkillForge MCP Server (SSE Mode)...");
 
-    // Fetch skills from blockchain
-    const skills = await blockchainSkillClient.listSkills();
+    const registeredTools = new Set<string>();
 
-    // Register each skill as a tool
-    for (const skill of skills) {
-        const toolName = skill.name
-            .toLowerCase()
-            .replace(/\s+/g, "-")
-            .replace(/[^a-z0-9-]/g, "");
+    async function syncSkills() {
+        try {
+            logger.info("Synchronizing skills from blockchain...");
+            // Clear metadata cache so we pick up IPFS updates
+            blockchainSkillClient.clearCache();
 
-        server.tool(
-            toolName,
-            `${skill.description}\n(SkillForge ID: ${skill.skillId})`,
-            {
-                input: z.string().describe("Input parameters for the skill"),
-            },
-            async ({ input }) => {
-                logger.info(`Requested execution of skill: ${skill.name} (${skill.skillId})`);
+            const currentSkills = await blockchainSkillClient.listSkills();
 
-                try {
-                    logger.info("Calling API...");
+            // Register each skill as a tool
+            for (const skill of currentSkills) {
+                const toolName = skill.name
+                    .toLowerCase()
+                    .replace(/\s+/g, "-")
+                    .replace(/[^a-z0-9-]/g, "");
 
-                    const apiUrl = process.env.SKILLFORGE_API_URL || "http://localhost:3000";
-                    const endpoint = `${apiUrl}/api/agent`;
+                server.tool(
+                    toolName,
+                    `${skill.description}\n(SkillForge ID: ${skill.skillId})`,
+                    {
+                        input: z.string().describe("Input parameters for the skill"),
+                    },
+                    async ({ input }) => {
+                        logger.info(`Requested execution of skill: ${skill.name} (${skill.skillId})`);
 
-                    const response = await axios.post(endpoint, {
-                        skillId: Number(skill.skillId),
-                        input,
-                        buyer: blockchainSkillClient.getAccountAddress(),
-                    });
+                        try {
+                            const apiUrl = process.env.SKILLFORGE_API_URL || "http://localhost:3000";
+                            const endpoint = `${apiUrl}/api/agent`;
 
-                    const result = response.data;
+                            const response = await axios.post(endpoint, {
+                                skillId: Number(skill.skillId),
+                                input,
+                                buyer: blockchainSkillClient.getAccountAddress(),
+                            });
 
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Skill executed successfully!\nResult:\n${JSON.stringify(result, null, 2)}`,
-                            },
-                        ],
-                    };
+                            const result = response.data;
 
-                } catch (error) {
-                    logger.error("Execution error caught in index.ts:", error);
-                    let message = "Unknown error";
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: `Skill executed successfully!\nResult:\n${JSON.stringify(result, null, 2)}`,
+                                    },
+                                ],
+                            };
 
-                    if (error instanceof Error) {
-                        message = error.message;
-                        if ((error as any).isAxiosError && (error as any).code === 'ECONNREFUSED') {
-                            message = `Backend server unreachable at ${process.env.SKILLFORGE_API_URL || 'localhost:3000'}. Ensure the SkillForge app is running.`;
-                        } else if ((error as any).response?.data?.error) {
-                            message = (error as any).response.data.error;
+                        } catch (error) {
+                            logger.error("Execution error caught in index.ts:", error);
+                            let message = "Unknown error";
+
+                            if (error instanceof Error) {
+                                message = error.message;
+                                if ((error as any).isAxiosError && (error as any).code === 'ECONNREFUSED') {
+                                    message = `Backend server unreachable at ${process.env.SKILLFORGE_API_URL || 'localhost:3000'}. Ensure the SkillForge app is running.`;
+                                } else if ((error as any).response?.data?.error) {
+                                    message = (error as any).response.data.error;
+                                }
+                            } else if (typeof error === 'string') {
+                                message = error;
+                            } else {
+                                message = JSON.stringify(error);
+                            }
+
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: `Error executing skill "${skill.name}": ${message}`,
+                                    },
+                                ],
+                                isError: true,
+                            };
                         }
-                    } else if (typeof error === 'string') {
-                        message = error;
-                    } else {
-                        message = JSON.stringify(error);
                     }
+                );
 
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Error executing skill "${skill.name}": ${message}`,
-                            },
-                        ],
-                        isError: true,
-                    };
+                if (!registeredTools.has(toolName)) {
+                    logger.info(`[Sync] Registered new tool: ${toolName}`);
+                    registeredTools.add(toolName);
                 }
             }
-        );
+
+            logger.info(`[Sync] Completed. ${currentSkills.length} skills active.`);
+        } catch (error) {
+            logger.error("[Sync] Failed to synchronize skills:", error);
+        }
     }
 
-    logger.info(`Registered ${skills.length} skills as tools`);
+    // Initial sync
+    await syncSkills();
+
+    // Set up periodic sync (every 5 minutes)
+    const SYNC_INTERVAL = 5 * 60 * 1000;
+    setInterval(syncSkills, SYNC_INTERVAL);
+    logger.info(`Dynamic skill sync enabled (Interval: 5m)`);
 
     // SSE Setup
     const app = express();

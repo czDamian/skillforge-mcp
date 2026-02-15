@@ -282,6 +282,11 @@ export class BlockchainSkillClient {
       return null;
     }
   }
+
+  clearCache(): void {
+    logger.debug("Clearing metadata cache...");
+    this.metadataCache.clear();
+  }
 }
 
 export const blockchainSkillClient = new BlockchainSkillClient();
